@@ -15,7 +15,10 @@ func testConfig() config {
 		Mode:         "move",
 		Conflict:     "rename",
 		MetadataMode: "never",
+		MediaFilter:  "all",
 		UseModTime:   true,
+		By:           layoutMonth,
+		MonthFormat:  "number-long",
 		MinYear:      1900,
 		MaxYear:      2100,
 	}
@@ -60,7 +63,7 @@ func TestDetermineDatePrioritizesMetadataBeforeFilenameForImagesAndVideos(t *tes
 
 	dir := t.TempDir()
 	fakeExiftool := filepath.Join(dir, "fake-exiftool")
-	if err := os.WriteFile(fakeExiftool, []byte("#!/bin/sh\nprintf '2024:05:09 10:03:22\\n'\n"), 0755); err != nil {
+	if err := os.WriteFile(fakeExiftool, []byte("#!/bin/sh\nprintf 'DateTimeOriginal: 2024:05:09 10:03:22\\n'\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +113,7 @@ func TestDestinationPathKnownDate(t *testing.T) {
 	}
 
 	got := destinationPath(cfg, result)
-	want := filepath.Join(cfg.DestRoot, "2024", "05", "IMG_20240505_120000.jpg")
+	want := filepath.Join(cfg.DestRoot, "2024", "05 - May", "IMG_20240505_120000.jpg")
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -137,7 +140,7 @@ func TestResolveDestinationRename(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, skipped, err := resolveDestination(original, "rename")
+	got, skipped, err := resolveDestination(original, "rename", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
