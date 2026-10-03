@@ -3,3 +3,4 @@ chronify.exe
 organizer-report-*.csv
 .DS_Store
 chronify-undo-*.csv
+dist/

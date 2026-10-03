@@ -39,10 +39,44 @@ can be undone.
 
 ## Installation
 
-Chronify is written in Go. You need **Go 1.21 or newer**
-([download](https://go.dev/dl/)); check with `go version`.
+### Option 1: download a prebuilt binary (no Go needed)
 
-### Option 1: install with Go (recommended)
+1. Open the [latest release](https://github.com/thatbackendguy/chronify/releases/latest)
+   and download the archive for your system:
+
+   | System | File |
+   | --- | --- |
+   | macOS, Apple Silicon (M1 and newer) | `chronify_<version>_darwin_arm64.tar.gz` |
+   | macOS, Intel | `chronify_<version>_darwin_amd64.tar.gz` |
+   | Linux, x86-64 | `chronify_<version>_linux_amd64.tar.gz` |
+   | Linux, ARM64 (e.g. Raspberry Pi 4/5) | `chronify_<version>_linux_arm64.tar.gz` |
+   | Windows, x86-64 | `chronify_<version>_windows_amd64.zip` |
+   | Windows, ARM64 | `chronify_<version>_windows_arm64.zip` |
+
+2. Extract it and move the binary onto your `PATH`. On macOS and Linux:
+
+   ```bash
+   tar -xzf chronify_*_darwin_arm64.tar.gz
+   sudo mv chronify_*/chronify /usr/local/bin/
+   ```
+
+   On Windows, extract the zip and put `chronify.exe` in a folder on your
+   `PATH` (or run it from the extracted folder).
+
+3. **macOS only:** the binary isn't notarized by Apple, so the first launch is
+   blocked with "cannot be opened". Clear the download flag once:
+
+   ```bash
+   xattr -d com.apple.quarantine /usr/local/bin/chronify
+   ```
+
+Optionally verify the download against `checksums.txt` from the same release:
+`shasum -a 256 -c checksums.txt --ignore-missing`.
+
+### Option 2: install with Go
+
+You need **Go 1.21 or newer** ([download](https://go.dev/dl/)); check with
+`go version`.
 
 ```bash
 go install github.com/thatbackendguy/chronify@latest
@@ -58,7 +92,7 @@ echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.zshrc && source ~/.zshrc
 
 (Use `~/.bashrc` if your shell is bash.)
 
-### Option 2: build from source
+### Option 3: build from source
 
 ```bash
 git clone https://github.com/thatbackendguy/chronify.git
@@ -309,6 +343,25 @@ example AVCHD `.mts` camcorder files):
 go test ./...      # run the tests
 go vet ./...       # static checks
 go build -o chronify .
+```
+
+### Making a release
+
+Releases are built by GitHub Actions
+([`.github/workflows/release.yml`](.github/workflows/release.yml)). Push a
+version tag and the workflow runs the tests, builds binaries for macOS,
+Linux and Windows (amd64 and arm64), and publishes them with checksums as a
+GitHub Release:
+
+```bash
+git tag -a v1.1.0 -m "Chronify v1.1.0"
+git push origin v1.1.0
+```
+
+To build the same archives locally (into `dist/`):
+
+```bash
+scripts/build-release.sh v1.1.0
 ```
 
 ## License

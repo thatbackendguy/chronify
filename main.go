@@ -36,7 +36,7 @@ func mainExitCode() int {
 		return 2
 	}
 	if cfg.ShowVersion {
-		fmt.Println("chronify", version)
+		fmt.Println("chronify", appVersion())
 		return 0
 	}
 	initUI(cfg)

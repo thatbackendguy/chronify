@@ -7,11 +7,25 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 )
 
+// version is set at build time with -ldflags "-X main.version=v1.2.3".
 var version = "dev"
+
+// appVersion falls back to the module version Go records for
+// "go install github.com/thatbackendguy/chronify@v1.2.3" builds.
+func appVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return version
+}
 
 type config struct {
 	SourceRoot    string
