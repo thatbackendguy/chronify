@@ -330,3 +330,5 @@ func TestMaxFilesRefusesLargeRuns(t *testing.T) {
 		t.Fatalf("run within the limit failed: %v", err)
 	}
 }
+
+func errorsAs(err error, target any) bool { return errors.As(err, target) }

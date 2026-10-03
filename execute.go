@@ -248,16 +248,28 @@ func isCrossDeviceError(err error) bool {
 	return errors.Is(err, syscall.EXDEV)
 }
 
+// samePath reports whether a and b name the same file or folder. When both
+// exist it compares the files themselves, because the default filesystems
+// on macOS and Windows ignore case: "01 - january/x.jpg" and
+// "01 - January/x.jpg" are the same file there.
 func samePath(a, b string) bool {
 	absA, errA := filepath.Abs(filepath.Clean(a))
 	absB, errB := filepath.Abs(filepath.Clean(b))
 	if errA != nil || errB != nil {
 		return filepath.Clean(a) == filepath.Clean(b)
 	}
+	if absA == absB {
+		return true
+	}
+	infoA, errA := os.Stat(absA)
+	infoB, errB := os.Stat(absB)
+	if errA == nil && errB == nil {
+		return os.SameFile(infoA, infoB)
+	}
 	if runtime.GOOS == "windows" {
 		return strings.EqualFold(absA, absB)
 	}
-	return absA == absB
+	return false
 }
 
 func isSubpath(child, parent string) bool {

@@ -248,6 +248,9 @@ func printPreview(w io.Writer, cfg config, p plan) {
 	if t.Exists > 0 {
 		notes = append(notes, [2]string{"Skipped (exists)", countFiles(t.Exists)})
 	}
+	if cfg.Mode == "copy" && samePath(cfg.SourceRoot, cfg.DestRoot) && t.Planned > 0 {
+		notes = append(notes, [2]string{"Copying in place", ui.yellow("originals stay unsorted next to the copies; use -mode move to sort them")})
+	}
 	if t.Failed > 0 {
 		notes = append(notes, [2]string{"Cannot plan", ui.red(countFiles(t.Failed) + " (see manifest)")})
 	}

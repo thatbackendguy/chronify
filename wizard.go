@@ -47,10 +47,16 @@ func runWizard(ctx context.Context, cfg config) (config, error) {
 	}
 
 	modes := []string{"copy", "move"}
+	copyHint, defaultMode := "(originals stay where they are; safest)", 0
+	if samePath(cfg.SourceRoot, cfg.DestRoot) {
+		// Copying into the folder being organized would leave every original
+		// unsorted next to its copy, so Move is the sensible default here.
+		copyHint, defaultMode = "(keeps a second copy of every file in the same folder)", 1
+	}
 	choice, err = askChoice(ctx, "Copy or move the files?", []string{
-		"Copy " + ui.dim("(originals stay where they are; safest)"),
+		"Copy " + ui.dim(copyHint),
 		"Move " + ui.dim("(no extra disk space needed)"),
-	}, 0)
+	}, defaultMode)
 	if err != nil {
 		return cfg, err
 	}

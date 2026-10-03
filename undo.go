@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -53,7 +55,7 @@ func runUndo(ctx context.Context, cfg config) error {
 		return err
 	}
 
-	items := planUndo(rows)
+	items := planUndo(rows, cfg.UnknownDir)
 	var restoreCount, restoreBytes, removeCount, removeBytes int64
 	skipReasons := map[string]int64{}
 	for _, item := range items {
@@ -267,12 +269,24 @@ func readManifest(path string) ([]manifestRow, error) {
 }
 
 // planUndo checks every moved/copied row against the disk, newest first.
-func planUndo(rows []manifestRow) []undoItem {
+func planUndo(rows []manifestRow, unknownDir string) []undoItem {
 	var items []undoItem
 	claimed := reservations{}
 	for i := len(rows) - 1; i >= 0; i-- {
 		row := rows[i]
 		item := undoItem{Row: row, Status: statusPlanned}
+
+		if row.Status == statusMoved || row.Status == statusCopied {
+			if err := validateUndoRow(row, unknownDir); err != nil {
+				item.Action = undoRestore
+				if row.Status == statusCopied {
+					item.Action = undoRemoveCopy
+				}
+				item.Status, item.Reason = statusSkipped, "not a file Chronify organized ("+err.Error()+")"
+				items = append(items, item)
+				continue
+			}
+		}
 
 		switch row.Status {
 		case statusMoved:
@@ -317,6 +331,14 @@ func applyUndo(item undoItem, unknownDir string) (string, error) {
 		pruneEmptyDateDirs(filepath.Dir(item.Row.Destination), unknownDir)
 		return statusRestored, nil
 	case undoRemoveCopy:
+		// Only delete a copy that is byte-for-byte identical to the original.
+		same, err := sameContent(item.Row.Source, item.Row.Destination)
+		if err != nil {
+			return statusFailed, err
+		}
+		if !same {
+			return statusFailed, fmt.Errorf("the copy differs from the original, so it was kept")
+		}
 		if err := os.Remove(item.Row.Destination); err != nil {
 			return statusFailed, err
 		}
@@ -333,6 +355,80 @@ func writeUndoRow(rep *report, item undoItem, status, reason string) error {
 		restoreTo = item.Row.Source
 	}
 	return rep.write([]string{status, action, item.Row.Destination, restoreTo, strconv.FormatInt(item.Row.Size, 10), reason})
+}
+
+var dupSuffixPattern = regexp.MustCompile(`^_dup\d{4}$`)
+
+// validateUndoRow makes sure a manifest row describes something Chronify
+// could have done: a media file filed into a date folder under its own
+// name (or that name plus a _dupNNNN suffix). Undo never acts on anything
+// else, so a hand-made or shared manifest can't move or delete arbitrary
+// files.
+func validateUndoRow(row manifestRow, unknownDir string) error {
+	source, dest := row.Source, row.Destination
+	if !filepath.IsAbs(source) || !filepath.IsAbs(dest) ||
+		filepath.Clean(source) != source || filepath.Clean(dest) != dest {
+		return fmt.Errorf("paths must be absolute")
+	}
+	if source == dest {
+		return fmt.Errorf("source and destination are the same")
+	}
+	if _, ok := mediaTypeFor(dest); !ok {
+		return fmt.Errorf("not a photo or video")
+	}
+	if !isDateFolderName(filepath.Base(filepath.Dir(dest)), unknownDir) {
+		return fmt.Errorf("not inside a date folder")
+	}
+
+	sourceName, destName := filepath.Base(source), filepath.Base(dest)
+	if sourceName == destName {
+		return nil
+	}
+	ext := filepath.Ext(sourceName)
+	if filepath.Ext(destName) != ext {
+		return fmt.Errorf("file name changed")
+	}
+	sourceStem := strings.TrimSuffix(sourceName, ext)
+	destStem := strings.TrimSuffix(destName, ext)
+	if !strings.HasPrefix(destStem, sourceStem) || !dupSuffixPattern.MatchString(destStem[len(sourceStem):]) {
+		return fmt.Errorf("file name changed")
+	}
+	return nil
+}
+
+// sameContent compares two files byte by byte.
+func sameContent(a, b string) (bool, error) {
+	fa, err := os.Open(a)
+	if err != nil {
+		return false, err
+	}
+	defer fa.Close()
+	fb, err := os.Open(b)
+	if err != nil {
+		return false, err
+	}
+	defer fb.Close()
+
+	bufA := make([]byte, 1024*1024)
+	bufB := make([]byte, 1024*1024)
+	for {
+		na, errA := io.ReadFull(fa, bufA)
+		nb, errB := io.ReadFull(fb, bufB)
+		if na != nb || !bytes.Equal(bufA[:na], bufB[:nb]) {
+			return false, nil
+		}
+		doneA := errA == io.EOF || errA == io.ErrUnexpectedEOF
+		doneB := errB == io.EOF || errB == io.ErrUnexpectedEOF
+		if errA != nil && !doneA {
+			return false, errA
+		}
+		if errB != nil && !doneB {
+			return false, errB
+		}
+		if doneA || doneB {
+			return doneA && doneB, nil
+		}
+	}
 }
 
 func fileMatches(path string, size int64) bool {
