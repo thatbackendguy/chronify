@@ -47,7 +47,9 @@ type config struct {
 	NoColor       bool
 	Interactive   bool
 	ShowVersion   bool
+	JSON          bool
 	Workers       int
+	MaxFiles      int64
 	MinYear       int
 	MaxYear       int
 	ProgressEvery int64
@@ -77,6 +79,7 @@ func defaultConfig() (config, error) {
 		MinYear:       1900,
 		MaxYear:       now.Year() + 1,
 		ProgressEvery: 1000,
+		MaxFiles:      -1,
 	}, nil
 }
 
@@ -108,11 +111,13 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	fs.BoolVar(&cfg.Verbose, "verbose", cfg.Verbose, "print every file action and the full month preview")
 	fs.BoolVar(&cfg.NoColor, "no-color", cfg.NoColor, "disable colored output (NO_COLOR is also honored)")
 	fs.BoolVar(&cfg.Interactive, "interactive", cfg.Interactive, "answer a few questions instead of passing flags")
+	fs.Int64Var(&cfg.MaxFiles, "max-files", cfg.MaxFiles, "refuse to apply a run that would move/copy more than N files; -1 means no limit")
 	fs.IntVar(&cfg.Workers, "workers", cfg.Workers, "parallel date-detection workers")
 	fs.IntVar(&cfg.MinYear, "min-year", cfg.MinYear, "minimum accepted media year")
 	fs.IntVar(&cfg.MaxYear, "max-year", cfg.MaxYear, "maximum accepted media year")
 	fs.Int64Var(&cfg.ProgressEvery, "progress-every", cfg.ProgressEvery, "when output is not a terminal, print progress every N files; 0 disables")
 	fs.BoolVar(&cfg.ShowVersion, "version", cfg.ShowVersion, "print the version and exit")
+	fs.BoolVar(&cfg.JSON, "json", cfg.JSON, "print machine-readable JSON events instead of text (for apps)")
 
 	if err := fs.Parse(args); err != nil {
 		return config{}, err
@@ -207,6 +212,9 @@ func validateConfig(cfg *config) error {
 
 	if cfg.Workers < 1 {
 		return fmt.Errorf("-workers must be at least 1")
+	}
+	if cfg.MaxFiles < -1 {
+		return fmt.Errorf("-max-files must be -1 (no limit) or more")
 	}
 	if cfg.MinYear < 1 || cfg.MaxYear < cfg.MinYear {
 		return fmt.Errorf("year bounds are invalid")

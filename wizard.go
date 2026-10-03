@@ -11,9 +11,9 @@ import (
 // runWizard asks for the main settings step by step. It is used when chronify
 // is started without arguments in a terminal, or with -interactive.
 func runWizard(ctx context.Context, cfg config) (config, error) {
-	fmt.Println(ui.bold("Chronify") + ui.dim(" · photo & video organizer"))
-	fmt.Println(ui.dim("Answer a few questions. Press Enter to accept the [default]. Nothing changes until you confirm."))
-	fmt.Println()
+	fmt.Fprintln(stdout, ui.bold("Chronify")+ui.dim(" · photo & video organizer"))
+	fmt.Fprintln(stdout, ui.dim("Answer a few questions. Press Enter to accept the [default]. Nothing changes until you confirm."))
+	fmt.Fprintln(stdout)
 
 	var err error
 	if cfg.SourceRoot, err = askFolder(ctx, "Folder with photos/videos to organize", cfg.SourceRoot, true); err != nil {
@@ -70,15 +70,15 @@ func runWizard(ctx context.Context, cfg config) (config, error) {
 		return cfg, err
 	}
 
-	fmt.Println(ui.dim("Next time you can run this directly:"))
-	fmt.Println("  " + equivalentCommand(cfg))
-	fmt.Println()
+	fmt.Fprintln(stdout, ui.dim("Next time you can run this directly:"))
+	fmt.Fprintln(stdout, "  "+equivalentCommand(cfg))
+	fmt.Fprintln(stdout)
 	return cfg, nil
 }
 
 func askFolder(ctx context.Context, question, def string, mustExist bool) (string, error) {
 	for {
-		fmt.Printf("%s %s: ", ui.bold(question), ui.dim("["+def+"]"))
+		fmt.Fprintf(stdout, "%s %s: ", ui.bold(question), ui.dim("["+def+"]"))
 		answer, err := readLine(ctx)
 		if err != nil {
 			return "", err
@@ -89,22 +89,22 @@ func askFolder(ctx context.Context, question, def string, mustExist bool) (strin
 		}
 		path, err = absPath(path)
 		if err != nil {
-			fmt.Println(ui.red("  " + err.Error()))
+			fmt.Fprintln(stdout, ui.red("  "+err.Error()))
 			continue
 		}
 
 		info, statErr := os.Stat(path)
 		switch {
 		case statErr == nil && !info.IsDir():
-			fmt.Println(ui.red("  That is a file, not a folder."))
+			fmt.Fprintln(stdout, ui.red("  That is a file, not a folder."))
 			continue
 		case statErr != nil && mustExist:
-			fmt.Println(ui.red("  Cannot open that folder: " + statErr.Error()))
+			fmt.Fprintln(stdout, ui.red("  Cannot open that folder: "+statErr.Error()))
 			continue
 		case statErr != nil:
-			fmt.Println(ui.dim("  It will be created."))
+			fmt.Fprintln(stdout, ui.dim("  It will be created."))
 		}
-		fmt.Println()
+		fmt.Fprintln(stdout)
 		return path, nil
 	}
 }
@@ -126,30 +126,30 @@ func askChoice(ctx context.Context, question string, options []string, def int) 
 	if def < 0 || def >= len(options) {
 		def = 0
 	}
-	fmt.Println(ui.bold(question))
+	fmt.Fprintln(stdout, ui.bold(question))
 	for i, option := range options {
 		marker := " "
 		if i == def {
 			marker = ui.cyan("›")
 		}
-		fmt.Printf(" %s %d) %s\n", marker, i+1, option)
+		fmt.Fprintf(stdout, " %s %d) %s\n", marker, i+1, option)
 	}
 	for {
-		fmt.Printf("Choose %s: ", ui.dim(fmt.Sprintf("[%d]", def+1)))
+		fmt.Fprintf(stdout, "Choose %s: ", ui.dim(fmt.Sprintf("[%d]", def+1)))
 		answer, err := readLine(ctx)
 		if err != nil {
 			return 0, err
 		}
 		if answer == "" {
-			fmt.Println()
+			fmt.Fprintln(stdout)
 			return def, nil
 		}
 		n, err := strconv.Atoi(answer)
 		if err == nil && n >= 1 && n <= len(options) {
-			fmt.Println()
+			fmt.Fprintln(stdout)
 			return n - 1, nil
 		}
-		fmt.Println(ui.red(fmt.Sprintf("  Please enter a number from 1 to %d.", len(options))))
+		fmt.Fprintln(stdout, ui.red(fmt.Sprintf("  Please enter a number from 1 to %d.", len(options))))
 	}
 }
 

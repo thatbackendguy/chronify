@@ -21,6 +21,7 @@ func testConfig() config {
 		MonthFormat:  "number-long",
 		MinYear:      1900,
 		MaxYear:      2100,
+		MaxFiles:     -1,
 	}
 }
 

@@ -39,14 +39,14 @@ type undoItem struct {
 // runUndo reverses a previous run from its CSV manifest: moved files go back
 // to where they came from, and copies are removed while the originals exist.
 func runUndo(ctx context.Context, cfg config) error {
-	fmt.Println(ui.bold("Chronify undo"))
-	fmt.Println()
+	fmt.Fprintln(stdout, ui.bold("Chronify undo"))
+	fmt.Fprintln(stdout)
 	mode := ui.yellow("DRY RUN") + ui.dim(" (preview only, nothing will change)")
 	if cfg.Apply {
 		mode = ui.bold("APPLY")
 	}
-	fmt.Printf("  Mode:     %s\n", mode)
-	fmt.Printf("  Manifest: %s\n\n", cfg.Undo)
+	fmt.Fprintf(stdout, "  Mode:     %s\n", mode)
+	fmt.Fprintf(stdout, "  Manifest: %s\n\n", cfg.Undo)
 
 	rows, err := readManifest(cfg.Undo)
 	if err != nil {
@@ -69,25 +69,31 @@ func runUndo(ctx context.Context, cfg config) error {
 		}
 	}
 
-	fmt.Println(ui.bold("Preview"))
+	skipped := []reasonCount{}
+	for _, reason := range sortedCounts(skipReasons) {
+		skipped = append(skipped, reasonCount{Reason: reason.Key, Count: reason.Value})
+	}
+	emit(undoPlanEvent{Event: "undo_plan", Restore: restoreCount, RestoreBytes: restoreBytes, Remove: removeCount, RemoveBytes: removeBytes, Skipped: skipped})
+
+	fmt.Fprintln(stdout, ui.bold("Preview"))
 	if restoreCount+removeCount+int64(len(skipReasons)) == 0 {
-		fmt.Println("  The manifest has no moved or copied files to undo (was it a dry run?).")
+		fmt.Fprintln(stdout, "  The manifest has no moved or copied files to undo (was it a dry run?).")
 		return nil
 	}
 	if restoreCount > 0 {
-		fmt.Printf("  Move back:     %s (%s) to their original folders\n", countFiles(restoreCount), humanBytes(restoreBytes))
+		fmt.Fprintf(stdout, "  Move back:     %s (%s) to their original folders\n", countFiles(restoreCount), humanBytes(restoreBytes))
 	}
 	if removeCount > 0 {
-		fmt.Printf("  Delete copies: %s (%s); originals are still in place\n", countFiles(removeCount), humanBytes(removeBytes))
+		fmt.Fprintf(stdout, "  Delete copies: %s (%s); originals are still in place\n", countFiles(removeCount), humanBytes(removeBytes))
 	}
 	for _, reason := range sortedCounts(skipReasons) {
-		fmt.Printf("  Skip:          %s — %s\n", countFiles(reason.Value), reason.Key)
+		fmt.Fprintf(stdout, "  Skip:          %s — %s\n", countFiles(reason.Value), reason.Key)
 	}
-	fmt.Println()
+	fmt.Fprintln(stdout)
 
 	total := restoreCount + removeCount
 	if total == 0 {
-		fmt.Println("Nothing can be undone.")
+		fmt.Fprintln(stdout, "Nothing can be undone.")
 		return nil
 	}
 
@@ -106,9 +112,9 @@ func runUndo(ctx context.Context, cfg config) error {
 			return err
 		}
 		if reportEnabled(cfg.ReportPath) {
-			fmt.Printf("Undo plan written to %s\n", cfg.ReportPath)
+			fmt.Fprintf(stdout, "Undo plan written to %s\n", cfg.ReportPath)
 		}
-		fmt.Println(ui.yellow("Dry run only — nothing was changed.") + " Re-run with " + ui.bold("-apply") + " to undo.")
+		fmt.Fprintln(stdout, ui.yellow("Dry run only — nothing was changed.")+" Re-run with "+ui.bold("-apply")+" to undo.")
 		return nil
 	}
 
@@ -121,10 +127,10 @@ func runUndo(ctx context.Context, cfg config) error {
 			return err
 		}
 		if !ok {
-			fmt.Println("Cancelled. Nothing was changed.")
+			fmt.Fprintln(stdout, "Cancelled. Nothing was changed.")
 			return nil
 		}
-		fmt.Println()
+		fmt.Fprintln(stdout)
 	}
 
 	rep, err := openReport(cfg.ReportPath, undoReportHeader)
@@ -151,8 +157,9 @@ func runUndo(ctx context.Context, cfg config) error {
 			case err != nil:
 				reason = err.Error()
 				failed++
+				emit(fileFailedEvent{Event: "file_failed", Source: item.Row.Destination, Destination: item.Row.Source, Error: reason})
 				prog.clear()
-				fmt.Printf("%s %s: %v\n", ui.red("failed:"), item.Row.Destination, err)
+				fmt.Fprintf(stdout, "%s %s: %v\n", ui.red("failed:"), item.Row.Destination, err)
 			case status == statusRestored:
 				restored++
 			case status == statusRemoved:
@@ -169,7 +176,7 @@ func runUndo(ctx context.Context, cfg config) error {
 		}
 		if cfg.Verbose && item.Status == statusPlanned {
 			prog.clear()
-			fmt.Printf("%s: %s\n", status, item.Row.Destination)
+			fmt.Fprintf(stdout, "%s: %s\n", status, item.Row.Destination)
 		}
 		prog.execTick(done, doneBytes, false)
 	}
@@ -179,16 +186,22 @@ func runUndo(ctx context.Context, cfg config) error {
 		return err
 	}
 
-	fmt.Println()
-	fmt.Println(ui.bold("Summary"))
-	fmt.Printf("  %-18s %s\n", "Moved back:", ui.green(formatCount(restored)))
-	fmt.Printf("  %-18s %s\n", "Copies deleted:", ui.green(formatCount(removed)))
-	fmt.Printf("  %-18s %s\n", "Failed:", formatCount(failed))
+	undoReport := ""
+	if reportEnabled(cfg.ReportPath) {
+		undoReport = cfg.ReportPath
+	}
+	emit(undoSummaryEvent{Event: "undo_summary", Restored: restored, Removed: removed, Failed: failed, Report: undoReport, Interrupted: interrupted, NotProcessed: remaining})
+
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, ui.bold("Summary"))
+	fmt.Fprintf(stdout, "  %-18s %s\n", "Moved back:", ui.green(formatCount(restored)))
+	fmt.Fprintf(stdout, "  %-18s %s\n", "Copies deleted:", ui.green(formatCount(removed)))
+	fmt.Fprintf(stdout, "  %-18s %s\n", "Failed:", formatCount(failed))
 	if remaining > 0 {
-		fmt.Printf("  %-18s %s\n", "Not processed:", ui.yellow(formatCount(remaining)+" (interrupted)"))
+		fmt.Fprintf(stdout, "  %-18s %s\n", "Not processed:", ui.yellow(formatCount(remaining)+" (interrupted)"))
 	}
 	if reportEnabled(cfg.ReportPath) {
-		fmt.Printf("  %-18s %s\n", "Undo manifest:", cfg.ReportPath)
+		fmt.Fprintf(stdout, "  %-18s %s\n", "Undo manifest:", cfg.ReportPath)
 	}
 
 	if interrupted {

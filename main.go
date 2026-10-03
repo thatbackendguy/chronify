@@ -14,6 +14,13 @@ import (
 
 var errInterrupted = errors.New("interrupted")
 
+// maxFilesError stops a run that is larger than -max-files.
+type maxFilesError struct{ planned, limit int64 }
+
+func (e maxFilesError) Error() string {
+	return fmt.Sprintf("this run would process %d files, more than the limit of %d (-max-files); nothing was changed", e.planned, e.limit)
+}
+
 // failuresError reports that the run finished but some files failed.
 type failuresError struct{ count int64 }
 
@@ -26,17 +33,21 @@ func main() {
 func mainExitCode() int {
 	args := os.Args[1:]
 	wizard := len(args) == 0 && isTerminal(os.Stdin) && isTerminal(os.Stdout)
+	if jsonRequested(args) {
+		enableJSONEvents()
+	}
 
 	cfg, err := parseConfig(args, os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return 0
 	}
 	if err != nil {
+		emit(errorEvent{Event: "error", Message: "configuration error: " + err.Error()})
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\nRun with -h for help.\n", err)
 		return 2
 	}
 	if cfg.ShowVersion {
-		fmt.Println("chronify", appVersion())
+		fmt.Fprintln(stdout, "chronify", appVersion())
 		return 0
 	}
 	initUI(cfg)
@@ -72,6 +83,7 @@ func exitCode(err error) int {
 		fmt.Fprintln(os.Stderr, "\nInput closed before setup finished. Nothing was changed.")
 		return 1
 	default:
+		emit(errorEvent{Event: "error", Message: err.Error()})
 		fmt.Fprintf(os.Stderr, "%s %v\n", ui.red("Error:"), err)
 		return 1
 	}
@@ -106,12 +118,13 @@ func run(ctx context.Context, cfg config) error {
 	p, err := buildPlan(ctx, cfg, tools, prog)
 	if err != nil {
 		if errors.Is(err, errInterrupted) {
-			fmt.Println("Nothing was changed.")
+			fmt.Fprintln(stdout, "Nothing was changed.")
 		}
 		return err
 	}
 
-	printPreview(os.Stdout, cfg, p)
+	printPreview(stdout, cfg, p)
+	emitPlan(cfg, p)
 	totals := p.totals()
 
 	if !cfg.Apply {
@@ -119,8 +132,13 @@ func run(ctx context.Context, cfg config) error {
 	}
 
 	if totals.Planned == 0 {
-		fmt.Println("Nothing to do.")
+		fmt.Fprintln(stdout, "Nothing to do.")
+		emitSummary(cfg, newStats(), p.Scanned, 0)
 		return nil
+	}
+
+	if cfg.MaxFiles >= 0 && totals.Planned > cfg.MaxFiles {
+		return maxFilesError{planned: totals.Planned, limit: cfg.MaxFiles}
 	}
 
 	if !cfg.Yes {
@@ -133,10 +151,10 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 		if !ok {
-			fmt.Println("Cancelled. Nothing was changed.")
+			fmt.Fprintln(stdout, "Cancelled. Nothing was changed.")
 			return nil
 		}
-		fmt.Println()
+		fmt.Fprintln(stdout)
 	}
 
 	return execute(ctx, cfg, p, totals, prog)
@@ -163,13 +181,14 @@ func finishDryRun(cfg config, p plan) error {
 	}
 
 	if cfg.Verbose && len(p.Items) > 0 {
-		fmt.Println()
+		fmt.Fprintln(stdout)
 	}
 	printSummary(cfg, s, p.Scanned, 0)
-	fmt.Println()
-	fmt.Println(ui.yellow("Dry run only — nothing was changed."))
+	emitSummary(cfg, s, p.Scanned, 0)
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, ui.yellow("Dry run only — nothing was changed."))
 	if p.totals().Planned > 0 {
-		fmt.Println("Review the preview (and CSV manifest), then re-run with " + ui.bold("-apply") + ".")
+		fmt.Fprintln(stdout, "Review the preview (and CSV manifest), then re-run with "+ui.bold("-apply")+".")
 	}
 	return nil
 }
@@ -208,6 +227,9 @@ func execute(ctx context.Context, cfg config, p plan, totals planTotals, prog *p
 			prog.clear()
 			printAction(item, action, false)
 		}
+		if action.Status == statusFailed {
+			emit(fileFailedEvent{Event: "file_failed", Source: item.File.Path, Destination: action.Destination, Error: errorText(action.Error)})
+		}
 		prog.execTick(doneFiles, doneBytes, false)
 	}
 	prog.execTick(doneFiles, doneBytes, true)
@@ -217,11 +239,12 @@ func execute(ctx context.Context, cfg config, p plan, totals planTotals, prog *p
 		return err
 	}
 
-	fmt.Println()
+	fmt.Fprintln(stdout)
 	printSummary(cfg, s, p.Scanned, remaining)
+	emitSummary(cfg, s, p.Scanned, remaining)
 	if reportEnabled(cfg.ReportPath) && (s.Moved > 0 || s.Copied > 0) {
-		fmt.Println()
-		fmt.Println(ui.dim("To reverse this run: chronify -undo " + shellQuote(cfg.ReportPath) + " -apply"))
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, ui.dim("To reverse this run: chronify -undo "+shellQuote(cfg.ReportPath)+" -apply"))
 	}
 
 	if interrupted {
@@ -238,4 +261,11 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

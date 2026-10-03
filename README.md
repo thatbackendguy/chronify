@@ -18,6 +18,17 @@ It is built for large collections, external drives, and cautious migrations:
 it always shows a preview first, asks before changing anything, and every run
 can be undone.
 
+**Two ways to use it:**
+
+| | Chronify CLI | Chronify for Mac |
+| --- | --- | --- |
+| For | The terminal, scripts, servers | Anyone who prefers a window |
+| Platforms | macOS, Linux, Windows | macOS 14 or newer |
+| Price | Free and open source, unlimited | Free for 100 files, then Chronify Pro (€1/month) |
+| Get it | [Install below](#installation) | [Download from Releases](https://github.com/thatbackendguy/chronify/releases/latest) |
+
+Both use the same engine, so they organize files exactly the same way.
+
 ## Features
 
 - Choose your layout: by **year**, **year → month**, or **year → month → day**
@@ -36,6 +47,30 @@ can be undone.
   verified before the original is deleted
 - Ctrl+C stops cleanly after the current file and keeps the manifest accurate
 - No runtime dependencies; a single binary for macOS, Linux and Windows
+
+## Chronify for Mac
+
+![Chronify for Mac](docs/images/chronify-mac-hero.jpg)
+
+Prefer a window to the terminal? **Chronify for Mac** is a native app with the
+same engine: pick a folder (or drop one in), check the preview, organize, and
+undo with a click.
+
+| Choose folders and layout | Organize with progress | Done, with undo |
+| --- | --- | --- |
+| ![Setup screen](docs/images/app-setup.png) | ![Progress screen](docs/images/app-progress.png) | ![Finished screen](docs/images/app-finished.png) |
+
+**Get it:** download `Chronify-<version>.dmg` from the
+[latest release](https://github.com/thatbackendguy/chronify/releases/latest),
+open it and drag **Chronify** to **Applications**. Requires macOS 14 or newer
+(Apple Silicon or Intel).
+
+**Pricing:** previews and undo are always free, and the first 100 files you
+organize are free. **Chronify Pro** (€1/month) removes the limit; subscribe
+from inside the app. The command-line tool stays free and unlimited.
+
+The Mac app is distributed as a download only; its source code is not part
+of this repository.
 
 ## Installation
 
@@ -255,6 +290,8 @@ cannot be undone.
 -min-year        minimum accepted media year (default 1900)
 -max-year        maximum accepted media year (default next year)
 -version         print the version
+-json            print machine-readable JSON events instead of text (for apps)
+-max-files N     refuse to apply a run larger than N files (-1 = no limit)
 ```
 
 Run `chronify -h` for the full help text.

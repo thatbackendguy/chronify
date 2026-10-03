@@ -21,7 +21,7 @@ var ui = terminalUI{}
 
 func initUI(cfg config) {
 	_, noColorEnv := os.LookupEnv("NO_COLOR")
-	ui.color = !cfg.NoColor && !noColorEnv && isTerminal(os.Stdout) && os.Getenv("TERM") != "dumb"
+	ui.color = !cfg.NoColor && !cfg.JSON && !noColorEnv && isTerminal(os.Stdout) && os.Getenv("TERM") != "dumb"
 }
 
 func isTerminal(f *os.File) bool {
@@ -48,6 +48,7 @@ func (u terminalUI) cyan(s string) string   { return u.paint("36", s) }
 type progress struct {
 	w          io.Writer
 	tty        bool
+	json       bool
 	every      int64
 	start      time.Time
 	lastDraw   time.Time
@@ -61,8 +62,9 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 
 func newProgress(cfg config) *progress {
 	return &progress{
-		w:     os.Stdout,
-		tty:   isTerminal(os.Stdout),
+		w:     stdout,
+		tty:   !events.enabled && isTerminal(os.Stdout),
+		json:  events.enabled,
 		every: cfg.ProgressEvery,
 		start: time.Now(),
 	}
@@ -92,8 +94,24 @@ func (p *progress) clear() {
 
 func (p *progress) finish() { p.clear() }
 
+// jsonDue limits JSON progress events to about ten per second.
+func (p *progress) jsonDue(force bool) bool {
+	now := time.Now()
+	if !force && now.Sub(p.lastDraw) < 100*time.Millisecond {
+		return false
+	}
+	p.lastDraw = now
+	return true
+}
+
 func (p *progress) planTick(processed, scanned int64) {
 	if p == nil {
+		return
+	}
+	if p.json {
+		if p.jsonDue(false) {
+			emit(scanEvent{Event: "scan", Dated: processed, Found: scanned})
+		}
 		return
 	}
 	if !p.tty {
@@ -119,6 +137,12 @@ func (p *progress) startExec(totalFiles, totalBytes int64) {
 
 func (p *progress) execTick(doneFiles, doneBytes int64, force bool) {
 	if p == nil {
+		return
+	}
+	if p.json {
+		if p.jsonDue(force) {
+			emit(progressEvent{Event: "progress", Done: doneFiles, Total: p.totalFiles, DoneBytes: doneBytes, TotalBytes: p.totalBytes})
+		}
 		return
 	}
 	if !p.tty {
@@ -203,14 +227,14 @@ func readLine(ctx context.Context) (string, error) {
 }
 
 func confirm(ctx context.Context, question string) (bool, error) {
-	fmt.Printf("%s %s ", question, ui.dim("[y/N]"))
+	fmt.Fprintf(stdout, "%s %s ", question, ui.dim("[y/N]"))
 	answer, err := readLine(ctx)
 	if err == io.EOF {
-		fmt.Println()
+		fmt.Fprintln(stdout)
 		return false, fmt.Errorf("no answer received (input was closed); re-run with -yes to skip the prompt")
 	}
 	if err != nil {
-		fmt.Println()
+		fmt.Fprintln(stdout)
 		return false, err
 	}
 	answer = strings.ToLower(answer)
@@ -275,23 +299,23 @@ func printRunHeader(cfg config, tools metadataTools) {
 		mode = ui.bold(strings.ToUpper(cfg.Mode))
 	}
 
-	fmt.Println(ui.bold("Chronify") + ui.dim(" · photo & video organizer"))
-	fmt.Println()
-	fmt.Printf("  Mode:        %s\n", mode)
-	fmt.Printf("  Source:      %s\n", cfg.SourceRoot)
-	fmt.Printf("  Destination: %s\n", cfg.DestRoot)
-	fmt.Printf("  Layout:      %s\n", layoutExample(cfg.By, cfg.MonthFormat))
-	fmt.Printf("  Media:       %s\n", cfg.MediaFilter)
+	fmt.Fprintln(stdout, ui.bold("Chronify")+ui.dim(" · photo & video organizer"))
+	fmt.Fprintln(stdout)
+	fmt.Fprintf(stdout, "  Mode:        %s\n", mode)
+	fmt.Fprintf(stdout, "  Source:      %s\n", cfg.SourceRoot)
+	fmt.Fprintf(stdout, "  Destination: %s\n", cfg.DestRoot)
+	fmt.Fprintf(stdout, "  Layout:      %s\n", layoutExample(cfg.By, cfg.MonthFormat))
+	fmt.Fprintf(stdout, "  Media:       %s\n", cfg.MediaFilter)
 	if cfg.Verbose {
-		fmt.Printf("  Workers:     %d\n", cfg.Workers)
-		fmt.Printf("  Years:       %d-%d\n", cfg.MinYear, cfg.MaxYear)
+		fmt.Fprintf(stdout, "  Workers:     %d\n", cfg.Workers)
+		fmt.Fprintf(stdout, "  Years:       %d-%d\n", cfg.MinYear, cfg.MaxYear)
 	}
-	fmt.Printf("  Metadata:    %s", cfg.MetadataMode)
+	fmt.Fprintf(stdout, "  Metadata:    %s", cfg.MetadataMode)
 	if cfg.MetadataMode == "auto" {
-		fmt.Printf(ui.dim(" (exiftool %s, ffprobe %s, mdls %s)"), yesNo(tools.Exiftool != ""), yesNo(tools.FFprobe != ""), yesNo(tools.MDLS != ""))
+		fmt.Fprintf(stdout, ui.dim(" (exiftool %s, ffprobe %s, mdls %s)"), yesNo(tools.Exiftool != ""), yesNo(tools.FFprobe != ""), yesNo(tools.MDLS != ""))
 	}
-	fmt.Println()
-	fmt.Println()
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout)
 }
 
 func yesNo(value bool) string {
@@ -307,18 +331,18 @@ func printAction(item plannedItem, action actionResult, dryRun bool) {
 		dateLabel = fmt.Sprintf("%s via %s", item.Date.Timestamp, item.Date.Source)
 	}
 	if action.Error != nil {
-		fmt.Printf("%s %s -> %s (%s): %v\n", ui.red(action.Status+":"), item.File.Path, action.Destination, dateLabel, action.Error)
+		fmt.Fprintf(stdout, "%s %s -> %s (%s): %v\n", ui.red(action.Status+":"), item.File.Path, action.Destination, dateLabel, action.Error)
 		return
 	}
 	name := action.Action
 	if dryRun && action.Status == statusPlanned {
 		name = "would " + name
 	}
-	fmt.Printf("%s %s -> %s %s\n", name+":", item.File.Path, action.Destination, ui.dim("("+dateLabel+")"))
+	fmt.Fprintf(stdout, "%s %s -> %s %s\n", name+":", item.File.Path, action.Destination, ui.dim("("+dateLabel+")"))
 }
 
 func printSummary(cfg config, s stats, scanned int64, remaining int64) {
-	fmt.Println(ui.bold("Summary"))
+	fmt.Fprintln(stdout, ui.bold("Summary"))
 	rows := [][2]string{
 		{"Media files found", formatCount(scanned)},
 		{"Images / videos", formatCount(s.ImageFiles) + " / " + formatCount(s.VideoFiles)},
@@ -346,14 +370,14 @@ func printSummary(cfg config, s stats, scanned int64, remaining int64) {
 		rows = append(rows, [2]string{"CSV manifest", cfg.ReportPath})
 	}
 	for _, row := range rows {
-		fmt.Printf("  %-18s %s\n", row[0]+":", row[1])
+		fmt.Fprintf(stdout, "  %-18s %s\n", row[0]+":", row[1])
 	}
 
 	if len(s.DateSourceHit) > 0 {
-		fmt.Println()
-		fmt.Println(ui.bold("Date sources"))
+		fmt.Fprintln(stdout)
+		fmt.Fprintln(stdout, ui.bold("Date sources"))
 		for _, item := range sortedCounts(s.DateSourceHit) {
-			fmt.Printf("  %-26s %s\n", item.Key, formatCount(item.Value))
+			fmt.Fprintf(stdout, "  %-26s %s\n", item.Key, formatCount(item.Value))
 		}
 	}
 }

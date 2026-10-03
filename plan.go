@@ -187,8 +187,8 @@ func (n *folderNode) sorted() []*folderNode {
 	return nodes
 }
 
-// printPreview shows where files will go as a year (→ month) tree.
-func printPreview(w io.Writer, cfg config, p plan) {
+// buildFolderTree groups planned files by year (and month) folder.
+func buildFolderTree(cfg config, p plan) *folderNode {
 	root := &folderNode{}
 	for _, item := range p.Items {
 		if item.Action.Status != statusPlanned {
@@ -204,7 +204,12 @@ func printPreview(w io.Writer, cfg config, p plan) {
 			year.add(parts[1], int(item.Date.Month), item.File.Size)
 		}
 	}
+	return root
+}
 
+// printPreview shows where files will go as a year (→ month) tree.
+func printPreview(w io.Writer, cfg config, p plan) {
+	root := buildFolderTree(cfg, p)
 	t := p.totals()
 	verb := capitalize(cfg.Mode)
 	fmt.Fprintln(w, ui.bold("Preview"))

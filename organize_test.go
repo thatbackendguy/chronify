@@ -304,3 +304,29 @@ func writeFixture(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+func TestMaxFilesRefusesLargeRuns(t *testing.T) {
+	src, _, cfg := organizeFixture(t, "move")
+	cfg.MaxFiles = 2
+
+	err := run(context.Background(), cfg)
+	var limitErr maxFilesError
+	if !errors.As(err, &limitErr) || limitErr.planned != 3 {
+		t.Fatalf("got %v, want maxFilesError for 3 files", err)
+	}
+	for _, rel := range fixtureFiles {
+		if !exists(filepath.Join(src, rel)) {
+			t.Fatalf("%s was moved despite the limit", rel)
+		}
+	}
+
+	cfg.MaxFiles = 0
+	if err := run(context.Background(), cfg); !errors.As(err, &limitErr) {
+		t.Fatalf("-max-files 0 must allow nothing, got %v", err)
+	}
+
+	cfg.MaxFiles = 3
+	if err := run(context.Background(), cfg); err != nil {
+		t.Fatalf("run within the limit failed: %v", err)
+	}
+}
